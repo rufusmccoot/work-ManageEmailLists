@@ -1,0 +1,16 @@
+# One exclusion per line
+# Full email addresses:
+steve.overbeck@gmail.com
+steve.overbeck@yahoo.com
+john.doe@example.com
+
+# Domains (without @):
+blocked-domain.com
+spam-source.net
+
+# Lines starting with # are comments
+# Empty lines are ignored
+
+# You can add notes after entries:
+jane.smith@company.com  # Left the company on 2024-01-15
+marketing@competitor.com  # Competitor domain
