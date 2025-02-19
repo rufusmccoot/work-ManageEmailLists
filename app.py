@@ -12,7 +12,7 @@ class EmailListFreshener:
         """Initialize the application."""
         self.window = tk.Tk()
         self.window.title("Email List Freshener")
-        self.window.geometry("600x550")
+        self.window.geometry("800x550")  # Made window wider
         
         # Initialize variables
         self.excel_file_path = tk.StringVar(self.window)
@@ -63,47 +63,71 @@ class EmailListFreshener:
     def create_gui(self):
         """Create the GUI elements."""
         # Excel file selection
-        excel_frame = ttk.LabelFrame(self.window, text="Hosted List Excel File", padding=5)
-        excel_frame.grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+        excel_frame = ttk.Frame(self.window)
+        excel_frame.pack(pady=10, padx=10, fill='x')
         
-        excel_entry = ttk.Entry(excel_frame, textvariable=self.excel_file_path, width=50)
-        excel_entry.grid(row=0, column=0, padx=5)
-        
-        excel_button = ttk.Button(excel_frame, text="Browse", command=self.browse_excel)
-        excel_button.grid(row=0, column=1, padx=5)
+        ttk.Label(excel_frame, text="Excel File:").pack(side='left')
+        self.excel_file_path = tk.StringVar()
+        excel_entry = ttk.Entry(excel_frame, textvariable=self.excel_file_path, width=80)  # Made entry wider
+        excel_entry.pack(side='left', padx=5, fill='x', expand=True)
+        ttk.Button(excel_frame, text="Browse", command=self.browse_excel).pack(side='left')
         
         # CSV folder selection
-        csv_frame = ttk.LabelFrame(self.window, text="CSV Folder", padding=5)
-        csv_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+        csv_frame = ttk.Frame(self.window)
+        csv_frame.pack(pady=10, padx=10, fill='x')
         
-        csv_entry = ttk.Entry(csv_frame, textvariable=self.csv_folder_path, width=50)
-        csv_entry.grid(row=0, column=0, padx=5)
-        
-        csv_button = ttk.Button(csv_frame, text="Browse", command=self.browse_csv)
-        csv_button.grid(row=0, column=1, padx=5)
+        ttk.Label(csv_frame, text="CSV Folder:").pack(side='left')
+        self.csv_folder_path = tk.StringVar()
+        csv_entry = ttk.Entry(csv_frame, textvariable=self.csv_folder_path, width=80)  # Made entry wider
+        csv_entry.pack(side='left', padx=5, fill='x', expand=True)
+        ttk.Button(csv_frame, text="Browse", command=self.browse_csv).pack(side='left')
         
         # Process button
         process_button = ttk.Button(self.window, text="Process Files", command=self.process_csvs)
-        process_button.grid(row=2, column=0, columnspan=2, pady=10)
+        process_button.pack(pady=10)
         
-        # Progress bar
-        self.progress_bar = ttk.Progressbar(self.window, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=3, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+        # Progress bar - make it 3x longer with a frame
+        progress_frame = ttk.Frame(self.window)
+        progress_frame.pack(fill='x', padx=10)
+        
+        # Configure equal weight for the columns to center the progress bar
+        progress_frame.columnconfigure(0, weight=1)  # Left spacer
+        progress_frame.columnconfigure(2, weight=1)  # Right spacer
+        
+        # Left spacer
+        ttk.Frame(progress_frame).grid(row=0, column=0, sticky='ew')
+        
+        # Progress bar in center column
+        self.progress_bar = ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100, length=600)
+        self.progress_bar.grid(row=0, column=1)
+        
+        # Right spacer
+        ttk.Frame(progress_frame).grid(row=0, column=2, sticky='ew')
+        
         self.progress_bar.grid_remove()  # Hide initially
         
-        # Status label
-        status_label = ttk.Label(self.window, textvariable=self.status_var)
-        status_label.grid(row=4, column=0, columnspan=2, pady=5)
+        # Status label - centered
+        status_frame = ttk.Frame(self.window)
+        status_frame.pack(fill='x')
+        ttk.Frame(status_frame).pack(side='left', expand=True)
+        status_label = ttk.Label(status_frame, textvariable=self.status_var)
+        status_label.pack(side='left')
+        ttk.Frame(status_frame).pack(side='left', expand=True)
+        
+        # Total count label
+        total_count_label = ttk.Label(status_frame, textvariable=tk.StringVar(value="Total: 0"))
+        total_count_label.pack(side='left')
         
         # Tree view for results
         self.tree = ttk.Treeview(self.window, columns=('Value',), height=15, show='tree')
-        self.tree.column('#0', width=400)  # Make text column wider
-        self.tree.column('Value', width=50, anchor='w')  # Left align values
-        self.tree.grid(row=5, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
+        self.tree.heading('#0', text='Category')
+        self.tree.column('#0', width=200, anchor='w', stretch=False)
+        self.tree.column('Value', width=50, anchor='w', stretch=True)
+        self.tree.pack(padx=5, pady=5, fill='x')
         
-        # Configure grid weights
-        self.window.grid_columnconfigure(0, weight=1)
-        self.window.grid_columnconfigure(1, weight=1)
+        # Remove grid weights as we're using pack
+        # self.window.grid_columnconfigure(0, weight=1)
+        # self.window.grid_columnconfigure(1, weight=1)
 
     def browse_excel(self):
         """Open file dialog to select hosted Excel list."""
@@ -200,12 +224,15 @@ class EmailListFreshener:
             # Initialize stats
             stats = {
                 'csv_total': 0,
+                'xlsx_initial': 0,
+                'added': 0,
+                'added_correct_company': 0,
+                'added_bad_company': 0,
                 'inactive': 0,
                 'invalid_format': 0,
                 'excluded': 0,
                 'already_exists': 0,
-                'previously_removed': 0,
-                'added': 0
+                'previously_removed': 0
             }
             
             # Get list of CSV files
@@ -232,6 +259,8 @@ class EmailListFreshener:
             
             print(f"Loaded {len(todo_emails)} existing emails")
             print(f"Loaded {len(removed_emails)} removed emails")
+            
+            stats['xlsx_initial'] = len(todo_emails)
             
             # Process each CSV file
             records_to_add = []
@@ -265,7 +294,7 @@ class EmailListFreshener:
                         # Update progress every 1000 rows
                         if total_processed % 1000 == 0:
                             self.progress_var.set((total_processed / len(df)) * 100)
-                            self.status_var.set(f"Processing row {total_processed}")
+                            self.status_var.set(f"Processing row {total_processed} of {len(df)}")
                             self.window.update()
                         
                         # 1. Check Active Status
@@ -306,7 +335,9 @@ class EmailListFreshener:
                         record = {
                             todo_email_col: row[email_col],  # Original case of email
                             'First Name': str(row['FirstName']).strip() if pd.notna(row.get('FirstName')) else "",
-                            'Last Name': str(row['LastName']).strip() if pd.notna(row.get('LastName')) else ""
+                            'Last Name': str(row['LastName']).strip() if pd.notna(row.get('LastName')) else "",
+                            'Extracted from hosted DBs': 'Yes',
+                            'Date': datetime.now().strftime('%m/%d/%Y')
                         }
                         
                         if matching_record:
@@ -314,12 +345,14 @@ class EmailListFreshener:
                             record['Company'] = matching_record['Company']
                             record['MailRoom'] = matching_record['MailRoom']
                             record['OCP'] = matching_record['OCP']
+                            stats['added_correct_company'] += 1
                         else:
                             # No matching domain found - use special company format
                             org_name = str(row['OrganizationName']).strip() if pd.notna(row.get('OrganizationName')) else ""
                             record['Company'] = f"zz_EmailListFreshen could not find company based on email address. Tracker PRO Org = {org_name}"
                             record['MailRoom'] = ""
                             record['OCP'] = ""
+                            stats['added_bad_company'] += 1
                         
                         # Add empty strings for other columns
                         for col in todo_df.columns:
@@ -370,24 +403,35 @@ class EmailListFreshener:
             self.status_var.set("")
 
     def display_summary(self, stats):
-        """Display summary of processed records"""
-        summary = "\nProcessing Summary:\n"
-        summary += "-" * 40 + "\n"
-        summary += f"Total emails in CSV files: {stats['csv_total']}\n"
-        summary += f"Records added: {stats['added']}\n"
-        summary += "\nSkipped Records:\n"
-        summary += f"  Already exists: {stats['already_exists']}\n"
-        summary += f"  Previously removed: {stats['previously_removed']}\n"
-        summary += f"  Invalid format: {stats['invalid_format']}\n"
-        summary += f"  Inactive users: {stats['inactive']}\n"
-        summary += f"  Domain excluded: {stats['excluded']}\n"
+        """Display processing summary in tree view."""
+        # Clear existing items
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+            
+        # Add main summary node
+        parent = self.tree.insert('', 'end', text='Processing Summary', open=True)
         
-        print(summary)
+        # Add counts
+        self.tree.insert(parent, 'end', text='Total emails in CSV files', values=(stats['csv_total'],))
+        self.tree.insert(parent, 'end', text='Total emails in XLSX', values=(stats['xlsx_initial'],))
         
-        # Update status
-        self.status_var.set("Processing complete")
-        self.progress_var.set(100)
-        self.window.update()
+        # Add records node with subitems
+        records = self.tree.insert(parent, 'end', text='Records added', values=(stats['added'],), open=True)
+        self.tree.insert(records, 'end', text='Correct company', values=(stats['added_correct_company'],))
+        self.tree.insert(records, 'end', text='Bad company', values=(stats['added_bad_company'],))
+        
+        # Show final count
+        self.tree.insert(parent, 'end', text='Final emails in XLSX', values=(stats['xlsx_initial'] + stats['added'],))
+        
+        # Add skipped records node with total
+        total_skipped = (stats['already_exists'] + stats['previously_removed'] + 
+                        stats['invalid_format'] + stats['inactive'] + stats['excluded'])
+        skipped = self.tree.insert(parent, 'end', text='Skipped Records', values=(total_skipped,), open=True)
+        self.tree.insert(skipped, 'end', text='Already exists', values=(stats['already_exists'],))
+        self.tree.insert(skipped, 'end', text='Previously removed', values=(stats['previously_removed'],))
+        self.tree.insert(skipped, 'end', text='Invalid format', values=(stats['invalid_format'],))
+        self.tree.insert(skipped, 'end', text='Inactive users', values=(stats['inactive'],))
+        self.tree.insert(skipped, 'end', text='Domain excluded', values=(stats['excluded'],))
 
     def run(self):
         """Start the application."""
