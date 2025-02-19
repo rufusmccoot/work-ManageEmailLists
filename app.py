@@ -337,7 +337,7 @@ class EmailListFreshener:
                             'First Name': str(row['FirstName']).strip() if pd.notna(row.get('FirstName')) else "",
                             'Last Name': str(row['LastName']).strip() if pd.notna(row.get('LastName')) else "",
                             'Extracted from hosted DBs': 'Yes',
-                            'Date': datetime.now().strftime('%m/%d/%Y')
+                            'Date Extracted': datetime.now().strftime('%m/%d/%Y')
                         }
                         
                         if matching_record:
@@ -359,7 +359,7 @@ class EmailListFreshener:
                             if col not in record:
                                 if col == 'Extracted from hosted DBs':
                                     record[col] = 'Yes'
-                                elif col == 'Date':
+                                elif col == 'Date Extracted':
                                     record[col] = datetime.now().strftime('%m/%d/%Y')
                                 else:
                                     record[col] = ""
