@@ -357,7 +357,12 @@ class EmailListFreshener:
                         # Add empty strings for other columns
                         for col in todo_df.columns:
                             if col not in record:
-                                record[col] = ""
+                                if col == 'Extracted from hosted DBs':
+                                    record[col] = 'Yes'
+                                elif col == 'Date':
+                                    record[col] = datetime.now().strftime('%m/%d/%Y')
+                                else:
+                                    record[col] = ""
                         
                         records_to_add.append(record)
                         stats['added'] += 1
