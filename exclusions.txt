@@ -1,16 +1,24 @@
-# One exclusion per line
+# This exclusions file is for excluding specific email addresses and domains.
+# There are two types of entries:
+# - Full email addresses: this-email@test-example.com
+# - Domains (without @): example-domain.com
+
+# Blank lines are ignored
+# Comments (lines starting with #) are ignored
+# You can add comments after entries:
+#     jane.smith@company.com  # Left the company on 2024-01-15  
+
+################################
 # Full email addresses:
-steve.overbeck@gmail.com
-steve.overbeck@yahoo.com
-john.doe@example.com
+################################
+#this-email@test-example.com
 
-# Domains (without @):
-blocked-domain.com
-spam-source.net
-
-# Lines starting with # are comments
-# Empty lines are ignored
-
-# You can add notes after entries:
-jane.smith@company.com  # Left the company on 2024-01-15
-marketing@competitor.com  # Competitor domain
+################################
+# Domains without @:
+################################
+#example-domain.com
+ryan.com
+yahoo.com
+gmail.com
+hotmail.com
+aol.com

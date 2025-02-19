@@ -23,9 +23,10 @@ class EmailListFreshener:
         # Create GUI elements
         self.create_gui()
         
-        # Load config
+        # Load config and exclusions
         self.config = configparser.ConfigParser()
         self.config.read('configuration.ini')
+        self.load_exclusions()
         
         # Set default paths from config
         self.excel_file_path.set(self.config.get('Paths', 'DefaultHostedList', fallback=''))
@@ -38,7 +39,27 @@ class EmailListFreshener:
         
         # Initialize summary path
         self.summary_path = None
+
+    def load_exclusions(self):
+        """Load exclusions from configuration.ini and exclusions.txt"""
+        self.excluded_emails = set()
+        self.excluded_domains = set()
         
+        # Load from exclusions.txt
+        try:
+            with open('exclusions.txt', 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        # Remove any inline comments
+                        line = line.split('#')[0].strip()
+                        if '@' in line:
+                            self.excluded_emails.add(line.lower())
+                        else:
+                            self.excluded_domains.add(line.lower())
+        except Exception as e:
+            print(f"Warning: Could not load exclusions.txt: {e}")
+
     def create_gui(self):
         """Create the GUI elements."""
         # Excel file selection
@@ -83,7 +104,7 @@ class EmailListFreshener:
         # Configure grid weights
         self.window.grid_columnconfigure(0, weight=1)
         self.window.grid_columnconfigure(1, weight=1)
-        
+
     def browse_excel(self):
         """Open file dialog to select hosted Excel list."""
         filename = filedialog.askopenfilename(
@@ -100,7 +121,7 @@ class EmailListFreshener:
         )
         if folder:
             self.csv_folder_path.set(folder)
-            
+
     def find_active_column(self, df):
         """Find the column that indicates if a user is active."""
         if 'Status' in df.columns:  # Direct match first
@@ -114,46 +135,33 @@ class EmailListFreshener:
         return None
         
     def is_user_active(self, value):
-        """Check if a user is active based on the value in the active column."""
+        """Check if a user is active based on the value in the active column.
+        Only 'Active' is considered active, everything else (Deleted, Inactive, etc.) is inactive."""
         if pd.isna(value):
-            return True
-            
-        str_value = str(value).lower()
-        
-        # If value is explicitly "active", user is active
-        if str_value == "active":
-            return True
-            
-        # If value is explicitly "inactive", user is inactive
-        if str_value == "inactive":
             return False
             
-        # Check other common inactive values
-        inactive_values = ['disabled', 'false', '0', 'no']
-        return not any(inactive in str_value for inactive in inactive_values)
-        
-    def find_matching_domain_record(self, email, todo_df):
-        """Check if email matches any excluded domain or pattern."""
-        # Get exclusions from config
-        try:
-            excluded_domains = [d.strip() for d in self.config.get('EmailExclusions', 'ExcludedDomains').split(',')]
-            excluded_patterns = [p.strip() for p in self.config.get('EmailExclusions', 'ExcludedPatterns').split(',')]
-        except:
-            excluded_domains = []
-            excluded_patterns = []
+        # Convert to string and check case-insensitive
+        str_value = str(value).strip().lower()
+        return str_value == 'active'
+
+    def is_excluded(self, email):
+        """Check if email is excluded based on exclusions list"""
+        email = email.lower()
+        if email in self.excluded_emails:
+            return True
             
-        # Check domains
-        email_domain = email.split('@')[1] if '@' in email else ''
-        if email_domain in excluded_domains:
-            return True, f"Matched excluded domain: {email_domain}"
-            
-        # Check patterns
-        for pattern in excluded_patterns:
-            if pattern in email:
-                return True, f"Matched excluded pattern: {pattern}"
-                
-        return False, ""
-        
+        domain = email.split('@')[1] if '@' in email else ''
+        return domain in self.excluded_domains
+
+    def find_email_column(self, df, sheet_name=""):
+        """Find the email column in a dataframe"""
+        email_column_names = ['email', 'emailaddress', 'e-mail', 'e_mail', 'Email', 'EmailAddress']
+        for col in df.columns:
+            if str(col).lower().replace(" ", "") in [name.lower().replace(" ", "") for name in email_column_names]:
+                print(f"Found email column in {sheet_name}: {col}")
+                return col
+        return None
+
     def process_csvs(self):
         """Process all CSVs in the configured folder"""
         try:
@@ -169,305 +177,179 @@ class EmailListFreshener:
             # Initialize stats
             stats = {
                 'csv_total': 0,
+                'inactive': 0,
                 'invalid_format': 0,
                 'excluded': 0,
                 'already_exists': 0,
                 'previously_removed': 0,
-                'inactive': 0,
-                'added': 0,
-                'added_with_org': 0,
-                'added_without_org': 0
+                'added': 0
             }
             
             # Get list of CSV files
-            csv_files = []
-            for file in os.listdir(csv_folder):
-                if file.lower().endswith('.csv'):
-                    csv_files.append(os.path.join(csv_folder, file))
-            
+            csv_files = [f for f in os.listdir(csv_folder) if f.lower().endswith('.csv')]
             if not csv_files:
-                print("No CSV files found!")
+                messagebox.showinfo("No Files", "No CSV files found!")
                 return
                 
-            print(f"\nFound {len(csv_files)} CSV files")
+            # Load Excel file once
+            print("Loading Excel file...")
+            todo_df = pd.read_excel(excel_path, sheet_name='To Do')
+            removed_df = pd.read_excel(excel_path, sheet_name='ZRemoved')
             
-            # Process each CSV
-            records_to_add = []
-            total_rows = 0
-            processed_rows = 0
+            # Find the email column in the Excel files - case insensitive
+            todo_email_col = next((col for col in todo_df.columns if col.lower() == 'email'), None)
+            removed_email_col = next((col for col in removed_df.columns if col.lower() == 'email'), None)
             
-            # First pass to count total rows
-            for csv_file in csv_files:
-                df = pd.read_csv(csv_file)
-                total_rows += len(df)
+            if not todo_email_col or not removed_email_col:
+                raise ValueError(f"Could not find email columns. To Do columns: {list(todo_df.columns)}, ZRemoved columns: {list(removed_df.columns)}")
+            
+            # Convert email columns to lowercase for case-insensitive comparison
+            todo_emails = set(todo_df[todo_email_col].str.lower().dropna())
+            removed_emails = set(removed_df[removed_email_col].str.lower().dropna())
+            
+            print(f"Loaded {len(todo_emails)} existing emails")
+            print(f"Loaded {len(removed_emails)} removed emails")
             
             # Process each CSV file
+            records_to_add = []
+            total_processed = 0
+            
             for csv_file in csv_files:
                 try:
-                    df = pd.read_csv(csv_file, encoding='utf-8-sig')
-                    print(f"\nProcessing {csv_file}")
-                    print(f"Found {len(df)} rows")
+                    full_path = os.path.join(csv_folder, csv_file)
+                    print(f"\nProcessing CSV file: {full_path}")
+                    df = pd.read_csv(full_path, encoding='utf-8-sig')
                     print(f"CSV columns: {list(df.columns)}")
-                    print("\nFirst few rows of UserLoginId:")
-                    if 'UserLoginId' in df.columns:
-                        print(df['UserLoginId'].head().to_string())
-                    else:
-                        print("UserLoginId column not found!")
-                        print("Available columns:")
-                        for col in df.columns:
-                            print(f"  - {col}")
                     
-                    # Read target Excel to get columns
-                    try:
-                        print(f"\nTrying to open Excel file: {excel_path}")
-                        todo_df = pd.read_excel(excel_path, sheet_name='To Do')
-                        print(f"Successfully opened Excel!")
-                        print(f"Target Excel columns: {list(todo_df.columns)}")
+                    # Find UserLoginId column (this is our email column in CSV)
+                    email_col = 'UserLoginId'  # We know this is the correct column name
+                    if email_col not in df.columns:
+                        print(f"No UserLoginId column found in {csv_file}")
+                        continue
+                    
+                    print(f"Using UserLoginId column for emails")
+                    
+                    # Find active column
+                    active_col = self.find_active_column(df)
+                    if active_col:
+                        print(f"Found active column: {active_col}")
+                    
+                    # Process each row
+                    for _, row in df.iterrows():
+                        stats['csv_total'] += 1
+                        total_processed += 1
                         
-                        # Find email column
-                        email_col = None
-                        for col in df.columns:
-                            if col == 'UserLoginId':  # Exact match for UserLoginId
-                                email_col = col
-                                print(f"Found UserLoginId column: {col}")
-                                break
+                        # Update progress every 1000 rows
+                        if total_processed % 1000 == 0:
+                            self.progress_var.set((total_processed / len(df)) * 100)
+                            self.status_var.set(f"Processing row {total_processed}")
+                            self.window.update()
                         
-                        if not email_col:
-                            print(f"No UserLoginId column found in {csv_file}")
-                            print("Available columns:")
-                            for col in df.columns:
-                                print(f"  - {col}")
+                        # 1. Check Active Status
+                        if active_col and not self.is_user_active(row[active_col]):
+                            stats['inactive'] += 1
                             continue
                         
-                        print(f"Using column for email: {email_col}")
-                        print("Sample values:")
-                        print(df[email_col].head().to_string())
+                        # 2. Get email and validate format
+                        email = str(row[email_col]).strip() if pd.notna(row[email_col]) else ""
+                        if not email or '@' not in email or '.' not in email.split('@')[1]:
+                            stats['invalid_format'] += 1
+                            continue
                         
-                        # Process each row
-                        total_rows = len(df)
-                        print(f"\nProcessing {total_rows} rows...")
-                        for idx, (_, row) in enumerate(df.iterrows(), 1):
-                            if idx % 100 == 0:  # Show progress every 100 rows
-                                print(f"Processing row {idx} of {total_rows}")
-                                self.progress_var.set(int((idx / total_rows) * 100))
-                                self.status_var.set(f"Processing row {idx} of {total_rows}")
-                                self.window.update()
-                            
-                            # Get email and validate
-                            email = str(row[email_col]).strip() if pd.notna(row[email_col]) else ""
-                            stats['csv_total'] += 1  # Count total emails found
-                            
-                            print(f"Row data for debugging:")
-                            print(f"Email column: {email_col}")
-                            print(f"Raw email value: {row[email_col]}")
-                            print(f"Processed email: {email}")
-                            
-                            if not email or '@' not in email:
-                                print(f"Invalid email format: {email}")
-                                stats['invalid_format'] += 1
-                                continue
-                            
-                            # Convert email to lowercase for consistency
-                            email = email.lower()
-                            print(f"\nProcessing email: {email}")
-                            
-                            # Skip if already in current emails
-                            if email in todo_df['email'].str.lower().dropna():
-                                print(f"Skipping - already exists in current emails")
-                                stats['already_exists'] += 1
-                                continue
-                            
-                            # Skip if in removed emails
-                            try:
-                                removed_df = pd.read_excel(excel_path, sheet_name='ZRemoved')
-                                if email in removed_df['email'].str.lower().dropna():
-                                    print(f"Skipping - found in removed emails")
-                                    stats['previously_removed'] += 1
-                                    continue
-                            except Exception as e:
-                                print(f"Error reading ZRemoved sheet: {str(e)}")
-                            
-                            # Check if user is inactive
-                            active_col = self.find_active_column(df)
-                            if active_col:
-                                status = row[active_col]
-                                is_active = self.is_user_active(status)
-                                print(f"Status value: {status}, Is active: {is_active}")
-                                if not is_active:
-                                    print(f"Skipping - user is inactive (status: {status})")
-                                    stats['inactive'] += 1
-                                    continue
-                            
-                            # Check exclusions
-                            should_exclude, reason = self.find_matching_domain_record(email, todo_df)
-                            if should_exclude:
-                                print(f"Skipping - {reason}")
-                                stats['excluded'] += 1
-                                continue
-                            
-                            print(f"ADDING {email}")
-                            
-                            # Create record with email from UserLoginId
-                            print("\nCreating record:")
-                            print(f"UserLoginId from row: {row[email_col]}")
-                            
-                            record = {}
-                            # First set the Email field from UserLoginId
-                            record['email'] = str(row[email_col]).strip() if pd.notna(row[email_col]) else ""
-                            print(f"Set email to: {record['email']}")
-                            
-                            # Then set other fields
-                            record.update({
-                                'Company': str(row['OrganizationName']).strip() if pd.notna(row.get('OrganizationName')) else "",
-                                'First Name': str(row['FirstName']).strip() if pd.notna(row.get('FirstName')) else "",
-                                'Last Name': str(row['LastName']).strip() if pd.notna(row.get('LastName')) else ""
-                            })
-                            
-                            # Add empty strings for other columns
-                            for col in todo_df.columns:
-                                if col not in record:
-                                    record[col] = ""
-                            
-                            print("Record created:")
-                            for key, value in record.items():
-                                print(f"  {key}: {value}")
-                            
-                            records_to_add.append(record)
-                            stats['added'] += 1
-                            processed_rows += 1
+                        # Convert email to lowercase for consistency
+                        email = email.lower()
                         
-                        # Update to 100% when done with file
-                        self.progress_var.set(100)
+                        # 3. Check exclusions
+                        if self.is_excluded(email):
+                            stats['excluded'] += 1
+                            continue
                         
-                    except Exception as e:
-                        print(f"Error reading target Excel: {str(e)}")
-                        print(f"Current working directory: {os.getcwd()}")
+                        # 4. Check if already in current emails
+                        if email in todo_emails:
+                            stats['already_exists'] += 1
+                            continue
                         
-                except Exception as e:
-                    print(f"Error reading CSV: {str(e)}")
-                    
-            print(f"\nFinished processing. Records to add: {len(records_to_add)}")
-            
-            # Add new records to Excel
-            print(f"\nTotal records collected: {len(records_to_add)}")
-            if records_to_add:
-                print(f"Adding {len(records_to_add)} records")
-                print("First few records:")
-                for i, record in enumerate(records_to_add[:3]):
-                    print(f"Record {i+1}: {record}")
+                        # 5. Check if in removed emails
+                        if email in removed_emails:
+                            stats['previously_removed'] += 1
+                            continue
+                        
+                        # 6. Add to records
+                        record = {
+                            todo_email_col: row[email_col],  # Use the correct column name from Excel
+                            'Company': str(row['OrganizationName']).strip() if pd.notna(row.get('OrganizationName')) else "",
+                            'First Name': str(row['FirstName']).strip() if pd.notna(row.get('FirstName')) else "",
+                            'Last Name': str(row['LastName']).strip() if pd.notna(row.get('LastName')) else ""
+                        }
+                        
+                        # Add empty strings for other columns
+                        for col in todo_df.columns:
+                            if col not in record:
+                                record[col] = ""
+                        
+                        records_to_add.append(record)
+                        stats['added'] += 1
                 
-                try:
-                    print("\nOpening workbook...")
-                    # Load workbook with data_only=False to preserve formulas
-                    wb = load_workbook(excel_path, data_only=False)
-                    print("Workbook opened successfully")
-                    
-                    # Get To Do sheet
-                    if "To Do" not in wb.sheetnames:
-                        print(f"Available sheets: {wb.sheetnames}")
-                        print("Could not find 'To Do' sheet!")
-                        return
-                    
-                    sheet = wb["To Do"]
-                    print("Found 'To Do' sheet")
-                    
-                    # Find last row with data by checking Email column
-                    last_row = sheet.max_row
-                    while last_row > 1:  # Start from bottom, work up, but keep header row
-                        if sheet.cell(row=last_row, column=1).value:  # If we find a non-empty email
-                            break
-                        last_row -= 1
-                    print(f"Last row with data: {last_row}")
-                    
-                    # Get column indices from headers
-                    headers = {}
-                    for col in range(1, sheet.max_column + 1):
-                        header = sheet.cell(row=1, column=col).value
-                        if header:
-                            headers[header] = col
-                    print(f"Found headers: {headers}")
-                    
-                    # Add each record
-                    print(f"\nTotal records to add: {len(records_to_add)}")
-                    print("First few records to be added:")
-                    for i, record in enumerate(records_to_add[:3]):
-                        print(f"\nRecord {i+1}:")
-                        for key, value in record.items():
-                            print(f"  {key}: {value}")
-                    
-                    print("\nAdding records...")
-                    records_added = 0
-                    start_row = last_row + 1  # Start adding after last existing row
-                    current_row = start_row
-                    
-                    print(f"Starting to add records at row {start_row}")
-                    for record in records_to_add:
-                        if not record.get('email'):  # Skip records without email
-                            print(f"Skipping record - no email: {record}")
-                            continue
-                            
-                        print(f"\nWriting record at row {current_row}:")
-                        for header, col_idx in headers.items():
-                            value = record.get(header, '')
-                            print(f"  Writing to column {col_idx} ({header}): {value}")
-                            sheet.cell(row=current_row, column=col_idx, value=value)
-                        records_added += 1
-                        current_row += 1
-                    
-                    print(f"\nFinished writing {records_added} records")
-                    print("First few cells after writing:")
-                    for row in range(start_row, min(start_row + 3, current_row)):
-                        print(f"\nRow {row}:")
-                        for header, col_idx in headers.items():
-                            value = sheet.cell(row=row, column=col_idx).value
-                            print(f"  {header}: {value}")
-                    
-                    print(f"\nSaving workbook with {records_added} new records...")
-                    wb.save(excel_path)
-                    print("Workbook saved successfully")
-                    
                 except Exception as e:
-                    print(f"Error writing to Excel: {str(e)}")
-                    import traceback
-                    print("Full error:")
-                    print(traceback.format_exc())
-                    return
+                    print(f"Error processing {csv_file}: {str(e)}")
             
-            # Hide progress bar
-            self.progress_bar.grid_remove()
-            self.status_var.set("Processing complete")
+            # Batch add records to Excel
+            if records_to_add:
+                print(f"Adding {len(records_to_add)} records to Excel...")
+                wb = load_workbook(excel_path, data_only=False)
+                sheet = wb["To Do"]
+                
+                # Find last row
+                last_row = sheet.max_row
+                while last_row > 1:
+                    if sheet.cell(row=last_row, column=1).value:
+                        break
+                    last_row -= 1
+                
+                # Get column indices
+                headers = {sheet.cell(row=1, column=col).value: col 
+                          for col in range(1, sheet.max_column + 1)
+                          if sheet.cell(row=1, column=col).value}
+                print(f"Excel headers: {headers}")
+                
+                # Add all records at once
+                for i, record in enumerate(records_to_add, 1):
+                    row_num = last_row + i
+                    for header, col_idx in headers.items():
+                        sheet.cell(row=row_num, column=col_idx, value=record.get(header, ''))
+                
+                wb.save(excel_path)
             
-            # Update tree with final statistics
-            self.tree.delete(*self.tree.get_children())  # Clear existing items
-            
-            # Add final statistics
-            self.tree.insert("", "end", values=("Total emails in CSV files", f"{stats['csv_total']:,}"))
-            self.tree.insert("", "end", values=("", ""))  # Blank line
-            
-            self.tree.insert("", "end", values=("Already in mailing list", f"{stats['already_exists']:,}"))
-            self.tree.insert("", "end", values=("Previously removed", f"{stats['previously_removed']:,}"))
-            self.tree.insert("", "end", values=("Inactive users", f"{stats['inactive']:,}"))
-            self.tree.insert("", "end", values=("Excluded emails", f"{stats['excluded']:,}"))
-            self.tree.insert("", "end", values=("Invalid format", f"{stats['invalid_format']:,}"))
-            self.tree.insert("", "end", values=("", ""))  # Blank line
-            
-            self.tree.insert("", "end", values=("Records added with org", f"{stats['added_with_org']:,}"))
-            self.tree.insert("", "end", values=("Records added without org", f"{stats['added_without_org']:,}"))
-            self.tree.insert("", "end", values=("", ""))  # Blank line
-            
-            # Make the total bold
-            total_added = stats['added_with_org'] + stats['added_without_org']
-            self.tree.insert("", "end", values=(f"Total records added: {total_added:,}", ""))
-            
-            # Update status
-            self.status_var.set("Finished!")
-            self.progress_var.set(100)
+            # Display summary
+            self.display_summary(stats)
             
         except Exception as e:
-            print(f"Error: {str(e)}")
-            self.status_var.set("Error occurred!")
+            messagebox.showerror("Error", f"An error occurred: {str(e)}")
+            print(f"Full error details: {str(e)}")
+        finally:
             self.progress_bar.grid_remove()
-    
+            self.status_var.set("")
+
+    def display_summary(self, stats):
+        """Display summary of processed records"""
+        summary = "\nProcessing Summary:\n"
+        summary += "-" * 40 + "\n"
+        summary += f"Total emails in CSV files: {stats['csv_total']}\n"
+        summary += f"Records added: {stats['added']}\n"
+        summary += "\nSkipped Records:\n"
+        summary += f"  Already exists: {stats['already_exists']}\n"
+        summary += f"  Previously removed: {stats['previously_removed']}\n"
+        summary += f"  Invalid format: {stats['invalid_format']}\n"
+        summary += f"  Inactive users: {stats['inactive']}\n"
+        summary += f"  Domain excluded: {stats['excluded']}\n"
+        
+        print(summary)
+        
+        # Update status
+        self.status_var.set("Processing complete")
+        self.progress_var.set(100)
+        self.window.update()
+
     def run(self):
         """Start the application."""
         self.window.mainloop()
