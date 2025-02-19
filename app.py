@@ -162,6 +162,29 @@ class EmailListFreshener:
                 return col
         return None
 
+    def get_domain_from_email(self, email):
+        """Extract domain from email address."""
+        try:
+            return email.split('@')[1].lower()
+        except:
+            return None
+            
+    def find_matching_domain_record(self, domain, todo_df, email_col):
+        """Find first record in ToDo sheet with matching domain and return its Company/MailRoom/OCP."""
+        if not domain:
+            return None
+            
+        for _, row in todo_df.iterrows():
+            if pd.notna(row[email_col]):
+                existing_domain = self.get_domain_from_email(str(row[email_col]).lower())
+                if existing_domain == domain:
+                    return {
+                        'Company': row.get('Company', ''),
+                        'MailRoom': row.get('MailRoom', ''),
+                        'OCP': row.get('OCP', '')
+                    }
+        return None
+
     def process_csvs(self):
         """Process all CSVs in the configured folder"""
         try:
@@ -275,12 +298,28 @@ class EmailListFreshener:
                             continue
                         
                         # 6. Add to records
+                        domain = self.get_domain_from_email(email)
+                        
+                        # Look for matching domain in ToDo sheet
+                        matching_record = self.find_matching_domain_record(domain, todo_df, todo_email_col)
+                        
                         record = {
-                            todo_email_col: row[email_col],  # Use the correct column name from Excel
-                            'Company': str(row['OrganizationName']).strip() if pd.notna(row.get('OrganizationName')) else "",
+                            todo_email_col: row[email_col],  # Original case of email
                             'First Name': str(row['FirstName']).strip() if pd.notna(row.get('FirstName')) else "",
                             'Last Name': str(row['LastName']).strip() if pd.notna(row.get('LastName')) else ""
                         }
+                        
+                        if matching_record:
+                            # Use values from matching domain record
+                            record['Company'] = matching_record['Company']
+                            record['MailRoom'] = matching_record['MailRoom']
+                            record['OCP'] = matching_record['OCP']
+                        else:
+                            # No matching domain found - use special company format
+                            org_name = str(row['OrganizationName']).strip() if pd.notna(row.get('OrganizationName')) else ""
+                            record['Company'] = f"zz_EmailListFreshen could not find company based on email address. Tracker PRO Org = {org_name}"
+                            record['MailRoom'] = ""
+                            record['OCP'] = ""
                         
                         # Add empty strings for other columns
                         for col in todo_df.columns:
