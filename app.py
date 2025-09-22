@@ -6,6 +6,7 @@ from docx import Document
 import configparser
 from datetime import datetime
 import re
+import math
 
 class EmailListManager:
     def __init__(self):
@@ -17,8 +18,9 @@ class EmailListManager:
         configure style for Treeview, and call setup_gui method.
         """
         self.window = tk.Tk()
-        self.window.title("Email List Manager")
+        self.window.title("EmailFusion")
         self.window.geometry("800x650")  # Made a bit taller
+        self.window.iconbitmap("fusion.ico")
         
         # Initialize variables
         self.docx_path = tk.StringVar()
@@ -373,12 +375,13 @@ class EmailListManager:
             onprem_df = None
             hosted_df = None
             combined_df = None
+            self.log_message(f"Email list(s)")
             
             # Read OnPrem and Hosted lists if needed
             if self.onprem_var.get() or self.mailroom_var.get() or self.ocp_var.get():
                 try:
                     onprem_df = pd.read_excel(self.config['Files']['onprem_list'])
-                    self.log_message(f"Processed OnPrem list: {len(onprem_df)} rows")
+                    self.log_message(f"{'    OnPrem list':.<50}{len(onprem_df):>5}")
                     if self.onprem_var.get():
                         # Extract and clean email column
                         onprem_emails = [self.clean_email(email) for email in onprem_df.iloc[:, 0]]
@@ -392,7 +395,7 @@ class EmailListManager:
             if self.hosted_var.get() or self.mailroom_var.get() or self.ocp_var.get():
                 try:
                     hosted_df = pd.read_excel(self.config['Files']['hosted_list'])
-                    self.log_message(f"Processed Hosted list: {len(hosted_df)} rows")
+                    self.log_message(f"{'    Hosted list':.<50}{len(hosted_df):>5}")
                     if self.hosted_var.get():
                         # Extract and clean email column
                         hosted_emails = [self.clean_email(email) for email in hosted_df.iloc[:, 0]]
@@ -418,7 +421,7 @@ class EmailListManager:
                     self.count_labels["MailRoom"].config(text=str(len(mailroom_emails)))
                     mailroom_df = pd.DataFrame({'Email': mailroom_emails})
                     combined_df = mailroom_df if combined_df is None else pd.concat([combined_df, mailroom_df], ignore_index=True)
-                    self.log_message(f"Processed MailRoom filter: {len(mailroom_emails)} rows")
+                    self.log_message(f"{'    Mailroom list':.<50}{len(mailroom_emails):>5}")
             
             # Process OCP (Column K)
             if self.ocp_var.get():
@@ -435,7 +438,7 @@ class EmailListManager:
                     self.count_labels["OCP"].config(text=str(len(ocp_emails)))
                     ocp_df = pd.DataFrame({'Email': ocp_emails})
                     combined_df = ocp_df if combined_df is None else pd.concat([combined_df, ocp_df], ignore_index=True)
-                    self.log_message(f"Processed OCP filter: {len(ocp_emails)} rows")
+                    self.log_message(f"{'    OCP list':.<50}{len(ocp_emails):>5}")
             
             # Save combined results if we have any data
             if combined_df is not None:
@@ -444,10 +447,7 @@ class EmailListManager:
                 combined_df.drop_duplicates(subset=['Email'], keep='first', inplace=True)
                 total_after = len(combined_df)
                 duplicates_removed = total_before - total_after
-                
-                self.log_message(f"\nTotal emails before deduplication: {total_before}")
-                self.log_message(f"Duplicates removed: {duplicates_removed}")
-                
+
                 # Get the last addresses from config
                 last_addresses = []
                 if 'LastAddressesToSend' in self.config and 'addresslist' in self.config['LastAddressesToSend']:
@@ -459,27 +459,47 @@ class EmailListManager:
                 
                 if last_addresses:
                     # Remove these addresses from the combined list if they exist
-                    combined_df = combined_df[~combined_df['Email'].isin(last_addresses)]
+                    last_addresses_already_in_list = combined_df['Email'].isin(last_addresses).sum() # How many dupes are there?
+                    combined_df = combined_df[~combined_df['Email'].isin(last_addresses)]            # Example marta@here.com in the config file and already in lists
                     
                     # Add them to the end
                     last_addresses_df = pd.DataFrame({'Email': last_addresses})
                     combined_df = pd.concat([combined_df, last_addresses_df], ignore_index=True)
-                    
-                    self.log_message(f"Added {len(last_addresses)} configured addresses to the end of the list")
-                
-                self.log_message(f"Final email count: {len(combined_df)}")
+                    total_last_addresses_added = len(last_addresses_df) - last_addresses_already_in_list # The size of the list in config file minus those already listed
+
+                self.log_message(f"\nReconciliation")
+                self.log_message(f"{'    Count before removing dupes':.<50}{total_before:>5}")
+                self.log_message(f"{'    Duplicates removed':.<50}{duplicates_removed:>5}")
+                self.log_message(f"{'    Addl addresses from config file':.<50}{total_last_addresses_added:>5}")
+                self.log_message(f"{'    Final list count':.<50}{len(combined_df):>5}")
                 
                 # Ensure output directory exists
                 output_dir = os.path.dirname(self.output_path)
                 os.makedirs(output_dir, exist_ok=True)
                 
-                # Save the combined DataFrame
+                # Save the combined DataFrame to Excel
                 combined_df.to_excel(self.output_path, index=False)
-                self.log_message(f"\nSaved combined list to: {self.output_path}")
+                self.log_message(f"\nOutput files")
+                self.log_message(f"    {os.path.basename(self.output_path)[:45].ljust(46, '.')}{len(combined_df):>5}")
                 
+                # Now also export as 500-record text files
+                docx_filename = os.path.basename(self.docx_path.get()) # Start with the docx filename again
+                base_name = os.path.splitext(docx_filename)[0]         # Strip .docx extension
+                output_folder = self.config['Files']['output_folder']  # Same output folder as Excel output
+                chunk_size = 500
+                num_chunks = math.ceil(len(combined_df) / chunk_size)
+                
+                for i in range(num_chunks):
+                    start, end = i * chunk_size, (i + 1) * chunk_size
+                    chunk_list = combined_df.iloc[start:end, 0].tolist()
+                    # use same base name as xlsx, append -chunkNN.txt
+                    txt_filename = f"{base_name}-chunk{i+1:02d}.txt"
+                    txt_path = os.path.join(output_folder, txt_filename).replace('/', '\\')
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write('; '.join(chunk_list))
+                    self.log_message(f"{f'    Chunk {i+1:02d} txt':.<50}{len(chunk_list):>5}")
                 # Update status and show buttons
                 self.status_text.config(state='normal')
-                self.status_text.insert(tk.END, f" Success! Generated list saved to: {self.output_path}\n", 'green')
                 self.status_text.config(state='disabled')
                 
                 # Show both buttons
