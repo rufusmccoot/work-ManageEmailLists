@@ -4,7 +4,10 @@ The Tracker PRO product team uses MS Word and MS Excel mail merge functionality 
 
 ## Features
 
-- Generate Excel listing of email addresses for targeted client notifications
+- Generate listing of email addresses for targeted client notifications without duplicates
+- Output:
+  - a single combined Excel list for mail merge
+  - chunked text files for pasting 500 email addresses into the To line (lol mail goes BRRRRRRRRRR)
 - Include any combination of:
   - On-Prem
   - Hosted
@@ -22,46 +25,15 @@ The Tracker PRO product team uses MS Word and MS Excel mail merge functionality 
       - Trigger words are configurable in configuration.ini
       - Smart selections can always be overridden
 
-## Requirements
-
-- Python 3.x
-- pandas
-- python-docx
-- tkinter (usually comes with Python)
-
 ## Setup
 
-1. Clone the repository:
-   ```bash
-   cd c:\some_folder
-   git clone https://github.com/rufusmccoot/work-ManageEmailLists.git
-   ```
-2. Create virtual environment:
-   ```bash
-   python -m venv venv
-   ```
-3. Activate virtual environment:
-   ```bash
-   venv\scripts\activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-   Or
-   ```bash
-   pip install --trusted-host pypi.org --trusted-host pypi.python.org --trusted-host files.pythonhosted.org -r requirements.txt
-   ```
-5. Have a look at `configuration.ini`
+1. Have a configuration.ini file in the same directory as the exe file
+2. Maybe look at the config file
+3. Double click the thing
 
 ## Usage
 
-1. Run the application:
-   ```bash
-   python app.py
-   ```
-   or double click the `run_it.bat` file
-
+1. Double click the exe file
 2. Select your Word document template
 3. Choose which mailing lists to include (OnPrem, Hosted, MailRoom, OCP)
 4. Click "Process" to generate the combined list
